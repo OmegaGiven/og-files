@@ -1,0 +1,103 @@
+[package]
+name = "og-files"
+version = "0.1.0"
+edition = "2021"
+description = "OG Files — file manager with built-in viewers and editors"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/OmegaGiven/og-files"
+
+[[bin]]
+name = "og-files"
+path = "src/main.rs"
+
+# Deliberately no og-* path deps: this app must build and run standalone,
+# outside the OG-OS distro. Suite integration (og-config theme, og-wayland
+# drag-out) comes in behind the optional `og-suite` feature — see SPEC.md §7.
+[dependencies]
+iced = { version = "0.13", features = ["image", "tokio", "advanced", "canvas", "wgpu", "highlighter", "markdown", "lazy"] }
+tokio = { version = "1.52.3", features = ["fs", "rt", "sync", "time", "io-util", "process"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mime_guess = "2"
+hayro = "0.7"
+lopdf = { version = "0.45", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
+iced_fonts = { version = "0.1", features = ["bootstrap"] }
+notify = "8"
+# home / config / state / cache dirs on macOS and Windows (Linux keeps its
+# own XDG lookups in config.rs)
+dirs = "6"
+symphonia = { version = "0.5", features = ["mp3", "aac", "alac", "isomp4"] }
+lofty = "0.22"
+hound = "3.5"
+# 3D viewer (viewers/model3d): loaders + math/GPU plumbing
+gltf = { version = "1.4", default-features = false, features = ["utils"] }
+tobj = { version = "4", default-features = false }
+stl_io = "0.8"
+glam = "0.25"
+bytemuck = { version = "1", features = ["derive"] }
+base64 = "0.22"
+# video decode fallback, thumbnails and trim (feature `ffmpeg`; needs the
+# FFmpeg dev libraries at build time)
+ffmpeg-next = { version = "9", optional = true }
+cpal = "0.18"
+# video player: libmpv loaded at runtime (falls back to ffmpeg-next without it)
+libloading = "0.8"
+quick-xml = "0.39"
+# spreadsheet viewer
+calamine = "0.36"
+csv = "1"
+rust_xlsxwriter = { version = "0.94", default-features = false }
+spreadsheet-ods = "0.25"
+# archive viewer
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs", "aes-crypto"] }
+tar = "0.4"
+flate2 = "1"
+xz2 = "0.1"
+zstd = "0.13"
+bzip2 = "0.4"
+sevenz-rust2 = { version = "0.20", default-features = false, features = ["aes256", "bzip2", "deflate", "ppmd", "compress"] }
+
+
+# Linux: UDisks2, Avahi, Secret Service over D-Bus
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+# statvfs, getuid, setsid, … (Linux + macOS)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# macOS / Windows: system trash, mounted volumes, OS keychain
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+trash = "5"
+sysinfo = { version = "0.37", default-features = false, features = ["disk"] }
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+
+# macOS app bundles (Info.plist, XML or binary) for "Open with"
+[target.'cfg(target_os = "macos")'.dependencies]
+plist = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
+
+[features]
+# OG-OS integration (on by default): suite palette with live reload and,
+# via og-wayland, drag-and-drop with other apps. Build with
+# --no-default-features for a fully standalone binary.
+default = []
+# FFmpeg (ffmpeg-next): fallback video player when libmpv is missing, video
+# thumbnails and lossless trim export. Without it video needs libmpv.
+ffmpeg = ["dep:ffmpeg-next"]
+
+[dev-dependencies]
+# macapps tests run on every OS
+plist = "1"
+tokio = { version = "1.52.3", features = ["macros", "rt", "time", "sync", "fs"] }
+# validates the 3D viewer's WGSL without a GPU (same naga as iced's wgpu)
+naga = { version = "0.19", features = ["wgsl-in"] }
+# test-only: checks the highlighter language tokens resolve (already an iced dep)
+syntect = "5"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("og-suite"))'] }
