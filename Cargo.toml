@@ -21,6 +21,21 @@ serde_json = "1"
 mime_guess = "2"
 hayro = "0.7"
 lopdf = { version = "0.45", default-features = false }
+memchr = "2"
+# CFF standard strings for the PDF/A font embedder (same version hayro uses)
+read-fonts = { version = "0.39", default-features = false }
+# PDF certificate signing / validation (tools/sign.rs): pure RustCrypto
+p12-keystore = "0.2"
+der = { version = "0.7", features = ["alloc", "oid"] }
+x509-cert = { version = "0.2", default-features = false, features = ["std", "pem"] }
+spki = "0.7"
+pkcs8 = { version = "0.10", features = ["pem", "encryption"] }
+rsa = { version = "0.9", features = ["sha2"] }
+p256 = { version = "0.13", features = ["ecdsa", "pem"] }
+p384 = { version = "0.13", features = ["ecdsa", "pem"] }
+sha1 = { version = "0.10", features = ["oid"] }
+sha2 = { version = "0.10", features = ["oid"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 ureq = { version = "2.12", default-features = false, features = ["tls"] }
 iced_fonts = { version = "0.1", features = ["bootstrap"] }
@@ -58,6 +73,28 @@ xz2 = "0.1"
 zstd = "0.13"
 bzip2 = "0.4"
 sevenz-rust2 = { version = "0.20", default-features = false, features = ["aes256", "bzip2", "deflate", "ppmd", "compress"] }
+# PDF vision tools (tools/ocr.rs, qrsplit.rs, scans.rs): pure-Rust OCR
+# (ocrs on the rten runtime, models embedded from assets/ocr/), QR
+# detection and scanned-photo segmentation
+ocrs = { version = "0.13", default-features = false, features = ["rten"] }
+rten = { version = "0.26", default-features = false, features = ["rten_format"] }
+rqrr = "0.11"
+imageproc = { version = "0.27", default-features = false }
+
+# anything → PDF (pdf/tools/topdf): Typst as an in-process typesetter, plus
+# input parsers. All pure Rust.
+typst = "0.15.1"
+typst-layout = "0.15.1"
+typst-pdf = "0.15.1"
+typst-kit = { version = "0.15.1", default-features = false, features = ["scan-fonts"] }
+# SVG sizing/validation (the usvg Typst's PDF export embeds SVGs with)
+usvg = { version = "0.47", default-features = false }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+scraper = { version = "0.24", default-features = false }
+url = "2"
+mail-parser = { version = "0.11", default-features = false }
+mobi = "0.8"
+rars = { version = "0.11", default-features = false }
 
 
 # Linux: UDisks2, Avahi, Secret Service over D-Bus
@@ -91,6 +128,8 @@ default = []
 ffmpeg = ["dep:ffmpeg-next"]
 
 [dev-dependencies]
+# test-only: self-signed signing certificates generated in tests
+x509-cert = { version = "0.2", features = ["builder"] }
 # macapps tests run on every OS
 plist = "1"
 tokio = { version = "1.52.3", features = ["macros", "rt", "time", "sync", "fs"] }
@@ -98,6 +137,11 @@ tokio = { version = "1.52.3", features = ["macros", "rt", "time", "sync", "fs"] 
 naga = { version = "0.19", features = ["wgsl-in"] }
 # test-only: checks the highlighter language tokens resolve (already an iced dep)
 syntect = "5"
+# test-only: QR separator pages and rendered text for the vision tools
+qrcode = { version = "0.14", default-features = false, features = ["image"] }
+ab_glyph = "0.2"
+# test-only: builds the .cbr fixture (the app itself only reads RAR)
+rars = { version = "0.11", default-features = false, features = ["write"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("og-suite"))'] }

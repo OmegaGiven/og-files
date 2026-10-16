@@ -53,14 +53,14 @@ pub fn supported(path: &Path) -> bool {
 // ---------------------------------------------------------------- model
 
 #[derive(Debug, Clone, Default, PartialEq)]
-struct Run {
-    text: String,
-    bold: bool,
-    italic: bool,
+pub(crate) struct Run {
+    pub(crate) text: String,
+    pub(crate) bold: bool,
+    pub(crate) italic: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Block {
+pub(crate) enum Block {
     Heading(u8, Vec<Run>),
     Para {
         runs: Vec<Run>,
@@ -72,13 +72,13 @@ enum Block {
 }
 
 #[derive(Debug, Clone)]
-struct Chapter {
-    title: String,
-    blocks: Vec<Block>,
+pub(crate) struct Chapter {
+    pub(crate) title: String,
+    pub(crate) blocks: Vec<Block>,
 }
 
 #[derive(Debug, Clone)]
-enum Doc {
+pub(crate) enum Doc {
     Markdown(String),
     Rich(Vec<Block>),
     Book(Vec<Chapter>),
@@ -101,7 +101,14 @@ pub async fn open(path: PathBuf) -> Result<Opened, String> {
     Ok(Opened { path, doc })
 }
 
-fn load(path: &Path) -> Result<Doc, String> {
+/// Parsed document as a debug string (tests of the PDF converters check
+/// that this viewer reads what they write).
+#[cfg(test)]
+pub(crate) fn debug_load(path: &Path) -> Result<String, String> {
+    load(path).map(|d| format!("{d:?}"))
+}
+
+pub(crate) fn load(path: &Path) -> Result<Doc, String> {
     let file = || std::fs::File::open(path).map_err(|e| e.to_string());
     match ext(path).as_str() {
         "md" | "markdown" => {
