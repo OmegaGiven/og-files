@@ -912,23 +912,24 @@ mod tests {
 
     #[test]
     fn tree_folder_click_opens_in_grid_without_expanding() {
+        // a real folder pair, so the test runs the same on every OS
+        let root = std::env::temp_dir().join(format!("ogx-sidebar-{}", std::process::id()));
+        let sub = root.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
         let (mut s, _) = Sidebar::new();
         assert_eq!(s.mode, Mode::Tree);
         s.mods = Modifiers::empty();
-        let ev = s
-            .item(ItemAct::Press(PathBuf::from("/usr"), Kind::Folder))
-            .1;
+        let ev = s.item(ItemAct::Press(root.clone(), Kind::Folder)).1;
         assert!(matches!(ev, Some(Event::Inspect(_, Kind::Folder))));
-        assert_eq!(s.browse.location, PathBuf::from("/usr"));
+        assert_eq!(s.browse.location, root);
         // grid half: single click selects only, double click navigates
         s.grid_focus = true;
-        let ev = s
-            .item(ItemAct::Press(PathBuf::from("/usr/bin"), Kind::Folder))
-            .1;
+        let ev = s.item(ItemAct::Press(sub.clone(), Kind::Folder)).1;
         assert!(matches!(ev, Some(Event::Inspect(..))));
-        assert_eq!(s.browse.location, PathBuf::from("/usr"));
-        s.item(ItemAct::Press(PathBuf::from("/usr/bin"), Kind::Folder));
-        assert_eq!(s.browse.location, PathBuf::from("/usr/bin"));
+        assert_eq!(s.browse.location, root);
+        s.item(ItemAct::Press(sub.clone(), Kind::Folder));
+        assert_eq!(s.browse.location, sub);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
