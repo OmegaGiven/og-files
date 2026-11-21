@@ -5,7 +5,8 @@ Because the app is sandboxed, on first launch it shows "OG Files needs your
 permission to open this folder" with a "Grant Access…" button. Clicking it
 opens the standard open panel at the home folder; choosing the home folder
 lets the app browse it. The choice is kept as a security-scoped bookmark.
-Downloads, Pictures, Music and Movies work without asking.
+The app has no folder entitlements other than user-selected files and
+app-scoped bookmarks; every folder is reached through this panel.
 
 To test: launch, click "Grant Access…", choose your home folder, then open
 any image, PDF, text file or .mp4/.mov video from the list on the left.

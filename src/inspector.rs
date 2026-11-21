@@ -1,10 +1,13 @@
-//! Right-hand inspector: properties of the focused file plus (later) the
-//! per-viewer tool panel (image adjustments, table column types, video trim…).
+//! Right-hand inspector: details of the selected file or folder and every
+//! action on it (open, open with, rename, copy/cut, duplicate, trash, delete).
+//! It never lists files: the one grid lives in the files pane, and the
+//! actions here run on that pane's selection (see app.rs `Message::Inspector`).
 
 use crate::filetype::Kind;
 use crate::fsops::{self, Meta};
 use crate::theme;
-use iced::widget::{column, row, scrollable, text, Space};
+use crate::app::MenuAction;
+use iced::widget::{button, column, row, scrollable, text, Space};
 use iced::{Element, Length, Task};
 use std::path::PathBuf;
 
@@ -17,9 +20,15 @@ pub struct Inspector {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Loaded(PathBuf, Result<Meta, String>),
+    /// an action button; the app runs it on the selection
+    Action(MenuAction),
 }
 
 impl Inspector {
+    pub fn target(&self) -> Option<&PathBuf> {
+        self.target.as_ref()
+    }
+
     pub fn focus(&mut self, target: Option<(PathBuf, Kind)>) -> Task<Msg> {
         self.meta = None;
         self.target = target.map(|(p, _)| p);
@@ -38,7 +47,7 @@ impl Inspector {
         match msg {
             // drop stale results if focus moved on while loading
             Msg::Loaded(p, r) if self.target.as_ref() == Some(&p) => self.meta = Some(r),
-            Msg::Loaded(..) => {}
+            Msg::Loaded(..) | Msg::Action(_) => {}
         }
     }
 
@@ -87,9 +96,8 @@ impl Inspector {
                 if let Some(n) = m.child_count {
                     c = c.push(field("Items", n.to_string()));
                 }
-                c = c.push(Space::with_height(12));
-                c = c.push(text("Tools").size(14));
-                c = c.push(text(tools_for(m.kind)).size(12).color(theme::MUTED));
+                c = c.push(Space::with_height(8));
+                c = c.push(actions(m.kind == Kind::Folder));
                 c.into()
             }
         };
@@ -103,22 +111,28 @@ impl Inspector {
     }
 }
 
-fn tools_for(kind: Kind) -> &'static str {
-    match kind {
-        Kind::Image => "view · pan / zoom · Make PDF · split scanned photos",
-        Kind::Video => {
-            "play · seek · frame step · speed; edit mode: snapshot frame, trim → new file"
-        }
-        Kind::Audio => {
-            "play · waveform seek · loop; edit mode: tags (save over), trim / normalize → new WAV"
-        }
-        Kind::Table => "sheets · edit cells · rows/columns · sort (edit mode)",
-        Kind::Text => "edit mode · syntax colours",
-        Kind::Doc => {
-            "PDF: page editing + 55 built-in tools (Tools). DOCX: Word-style editor (edit mode). Markdown: edit source. ODT / EPUB: reader"
-        }
-        Kind::Model3d => "orbit · pan · zoom · shaded / wire / normals · Y/Z up · dimensions",
-        Kind::Archive => "browse like a folder · open entries · extract",
-        _ => "bytes view (hex)",
+fn actions<'a>(folder: bool) -> Element<'a, Msg> {
+    let b = |label: &'static str, a: MenuAction| {
+        button(text(label).size(12))
+            .on_press(Msg::Action(a))
+            .style(button::secondary)
+            .padding([3, 8])
+    };
+    let mut r = row![b("Open", MenuAction::Open)].spacing(4);
+    if !folder {
+        r = r.push(b("Open in default app", MenuAction::OpenDefault));
+        r = r.push(b("Open with…", MenuAction::OpenWith));
     }
+    for (l, a) in [
+        ("Rename", MenuAction::Rename),
+        ("Copy", MenuAction::Copy),
+        ("Cut", MenuAction::Cut),
+        ("Duplicate", MenuAction::Duplicate),
+        ("Copy path", MenuAction::CopyPath),
+        ("Move to Trash", MenuAction::Trash),
+        ("Delete", MenuAction::Delete),
+    ] {
+        r = r.push(b(l, a));
+    }
+    row(vec![r.wrap().into()]).into()
 }

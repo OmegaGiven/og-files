@@ -12,15 +12,9 @@
   <true/>
   <key>com.apple.security.files.bookmarks.app-scope</key>
   <true/>
-  <!-- The usual media folders work without asking first. -->
-  <key>com.apple.security.files.downloads.read-write</key>
-  <true/>
-  <key>com.apple.security.assets.pictures.read-write</key>
-  <true/>
-  <key>com.apple.security.assets.music.read-write</key>
-  <true/>
-  <key>com.apple.security.assets.movies.read-write</key>
-  <true/>
+  <!-- No folder entitlements beyond user-selected: every folder, Downloads
+       and the media folders included, is opened through "Grant Access…"
+       (App Review 2.4.5(i): only the minimum set of entitlements). -->
   <!-- Convert to PDF: fetching a web page, or images an HTML/Markdown
        file links to. Nothing else uses the network. -->
   <key>com.apple.security.network.client</key>

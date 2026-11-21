@@ -18,8 +18,9 @@ To release: bump `version` in `Cargo.toml` and push to `main`.
 What's different from the direct-download build:
 - **Sandboxed** (`OGFiles.entitlements`). Folders are read only after the
   user grants them in the open panel; grants are kept as security-scoped
-  bookmarks in the container (`src/macos.rs`). Downloads, Pictures, Music
-  and Movies are allowed up front.
+  bookmarks in the container (`src/macos.rs`). No other folder
+  entitlements (Downloads, Pictures, Music, Movies were removed after App
+  Review rejected 0.2.0 under guideline 2.4.5(i)): keep the set minimal.
 - **No GPL code**: no libmpv, no FFmpeg. Video plays through AVFoundation
   (`src/viewers/video/av.rs`): mp4, m4v, mov (H.264, HEVC, ProRes); not
   mkv/webm. The workflow fails if the binary links either library.

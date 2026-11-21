@@ -14,6 +14,7 @@ use crate::search::{self, Search};
 use crate::tree::{self, Tree, TRASH};
 use crate::widgets::{ItemAct, Selection};
 use iced::keyboard::Modifiers;
+use iced::widget::pane_grid::{self, PaneGrid};
 use iced::widget::{button, checkbox, column, row, scrollable, text, text_input, Space};
 use iced::{Element, Length, Task};
 use std::path::{Path, PathBuf};
@@ -23,6 +24,19 @@ use std::time::{Duration, Instant};
 pub enum Mode {
     Tree,
     List,
+    Grid,
+}
+
+/// Tree layout: the tree's share of the files pane width, and the range a
+/// drag of the divider may set.
+const TREE_RATIO: f32 = 0.34;
+const TREE_RATIO_MIN: f32 = 0.12;
+const TREE_RATIO_MAX: f32 = 0.8;
+
+/// The two halves of the Tree layout, split by a draggable divider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Half {
+    Tree,
     Grid,
 }
 
@@ -68,6 +82,8 @@ pub struct Sidebar {
     query: String,
     query_gen: u64,
     pub focused: bool,
+    /// Tree layout: the grid half (not the tree) was clicked last
+    grid_focus: bool,
     pub mods: Modifiers,
     pub sel: Selection,
     last_click: Option<(PathBuf, Instant)>,
@@ -77,6 +93,8 @@ pub struct Sidebar {
     /// release unless a drag happened
     pending_collapse: Option<PathBuf>,
     typeahead: (String, Option<Instant>),
+    /// Tree layout: tree | grid, resizable
+    tree_split: pane_grid::State<Half>,
     tree: Tree,
     browse: Browse,
     search: Search,
@@ -95,6 +113,7 @@ pub enum Msg {
     Tree(tree::Msg),
     Browse(browse::Msg),
     Search(search::Msg),
+    TreeSplit(pane_grid::ResizeEvent),
 }
 
 pub enum Event {
@@ -123,12 +142,19 @@ impl Sidebar {
             query: String::new(),
             query_gen: 0,
             focused: false,
+            grid_focus: false,
             mods: Modifiers::default(),
             sel: Selection::default(),
             last_click: None,
             pressed: None,
             pending_collapse: None,
             typeahead: (String::new(), None),
+            tree_split: pane_grid::State::with_configuration(pane_grid::Configuration::Split {
+                axis: pane_grid::Axis::Vertical,
+                ratio: TREE_RATIO,
+                a: Box::new(pane_grid::Configuration::Pane(Half::Tree)),
+                b: Box::new(pane_grid::Configuration::Pane(Half::Grid)),
+            }),
             tree,
             browse: Browse::new(),
             search: Search::default(),
@@ -140,10 +166,8 @@ impl Sidebar {
 
     /// Show a folder (from the command line or elsewhere) in list view.
     pub fn reveal(&mut self, path: PathBuf) -> Task<Msg> {
-        if self.mode == Mode::Tree {
-            self.mode = Mode::List;
-        }
         self.sel.clear();
+        self.grid_focus = true;
         self.browse.navigate(path).map(Msg::Browse)
     }
 
@@ -156,10 +180,8 @@ impl Sidebar {
                 .map(Path::to_path_buf)
                 .unwrap_or_else(crate::config::home)
         };
-        if self.mode == Mode::Tree {
-            self.mode = Mode::List;
-        }
         let t = self.browse.navigate(dir).map(Msg::Browse);
+        self.grid_focus = true;
         self.sel.only(p);
         t
     }
@@ -170,9 +192,6 @@ impl Sidebar {
     }
 
     pub fn edit_path(&mut self) -> Task<Msg> {
-        if self.mode == Mode::Tree {
-            self.mode = Mode::List;
-        }
         self.browse.start_path_edit().map(Msg::Browse)
     }
 
@@ -200,7 +219,7 @@ impl Sidebar {
     /// Folders currently on screen, for the folder watcher.
     pub fn watched_dirs(&self) -> Vec<PathBuf> {
         let mut d = self.tree.open_dirs();
-        if !self.browse.is_trash() && self.mode != Mode::Tree {
+        if !self.browse.is_trash() {
             d.push(self.browse.location.clone());
         }
         d.sort();
@@ -221,7 +240,7 @@ impl Sidebar {
 
     /// Folder that "paste" / "new folder" target right now.
     pub fn current_dir(&self) -> PathBuf {
-        if self.mode != Mode::Tree && !self.browse.is_trash() {
+        if !self.on_tree() && !self.browse.is_trash() {
             return self.browse.location.clone();
         }
         match &self.sel.cursor {
@@ -239,7 +258,7 @@ impl Sidebar {
             self.search.visible_items()
         } else {
             match self.mode {
-                Mode::Tree => self
+                Mode::Tree if self.on_tree() => self
                     .tree
                     .visible_paths()
                     .into_iter()
@@ -251,6 +270,16 @@ impl Sidebar {
                 _ => self.browse.visible_items(),
             }
         }
+    }
+
+    /// Keyboard / paste target is the tree half of the Tree layout (the
+    /// other half is the grid; List and Grid modes have no tree at all).
+    fn on_tree(&self) -> bool {
+        self.mode == Mode::Tree && !self.grid_focus
+    }
+
+    fn grid_shown(&self) -> bool {
+        self.mode == Mode::Grid || (self.mode == Mode::Tree && self.grid_focus)
     }
 
     fn kind_of(&self, p: &Path) -> Kind {
@@ -280,9 +309,9 @@ impl Sidebar {
             (search::SCROLL_ID, self.search.reveal(c))
         } else {
             match self.mode {
-                Mode::Tree => (tree::SCROLL_ID, self.tree.reveal(c)),
+                Mode::Tree if self.on_tree() => (tree::SCROLL_ID, self.tree.reveal(c)),
                 Mode::List => (browse::SCROLL_ID, self.browse.reveal(c, false)),
-                Mode::Grid => (browse::SCROLL_ID, self.browse.reveal(c, true)),
+                Mode::Tree | Mode::Grid => (browse::SCROLL_ID, self.browse.reveal(c, true)),
             }
         };
         match off {
@@ -300,9 +329,6 @@ impl Sidebar {
             return (Task::none(), Some(Event::Net(act)));
         }
         if p.as_os_str() == TRASH {
-            if self.mode == Mode::Tree {
-                self.mode = Mode::List;
-            }
             self.sel.clear();
             return (self.browse.navigate(p).map(Msg::Browse), None);
         }
@@ -315,7 +341,7 @@ impl Sidebar {
             {
                 return (Task::none(), Some(Event::Mount(d)));
             }
-            if self.mode == Mode::Tree && !self.search.is_active() {
+            if self.on_tree() && !self.search.is_active() {
                 let (t, ev) = self.tree.toggle_path(&p, None);
                 let ev = ev.and_then(|e| self.tree_event(e));
                 return (t.map(Msg::Tree), ev);
@@ -324,13 +350,10 @@ impl Sidebar {
             if self.search.is_active() {
                 self.close_search_now();
             }
-            if self.mode == Mode::Tree {
-                self.mode = Mode::List;
-            }
             self.sel.clear();
             return (self.browse.navigate(p).map(Msg::Browse), None);
         }
-        if self.browse.is_trash() && self.mode != Mode::Tree {
+        if self.browse.is_trash() && !self.on_tree() {
             return (
                 Task::none(),
                 Some(Event::Status(
@@ -390,8 +413,20 @@ impl Sidebar {
                 if double {
                     return self.activate(p, kind, true);
                 }
+                // Tree layout: a folder clicked in the tree opens in the
+                // grid. The tree itself never follows grid navigation.
+                if self.on_tree()
+                    && !self.search.is_active()
+                    && (p.as_os_str() == TRASH
+                        || (kind == Kind::Folder
+                            && p.is_absolute()
+                            && !self.is_unmounted_drive(&p)))
+                {
+                    let nav = self.browse.navigate(p.clone()).map(Msg::Browse);
+                    return (nav, Some(Event::Inspect(p, kind)));
+                }
                 // single click: preview files, inspect folders
-                let in_trash_view = self.browse.is_trash() && self.mode != Mode::Tree;
+                let in_trash_view = self.browse.is_trash() && !self.on_tree();
                 if kind != Kind::Folder && !in_trash_view && p.as_os_str() != TRASH {
                     (Task::none(), Some(Event::Open(p, kind, false)))
                 } else {
@@ -467,7 +502,7 @@ impl Sidebar {
             net,
             bookmarked: items.len() == 1 && self.tree.is_bookmarked(&items[0].0),
             dir: self.current_dir(),
-            in_trash: (self.browse.is_trash() && self.mode != Mode::Tree) || trash_clicked,
+            in_trash: (self.browse.is_trash() && !self.on_tree()) || trash_clicked,
             drive,
             items,
         })
@@ -491,17 +526,18 @@ impl Sidebar {
             .cursor
             .as_ref()
             .and_then(|c| items.iter().position(|(p, _)| p == c));
-        let step = match self.mode {
-            Mode::Grid if !self.search.is_active() => self.browse.grid_cols(),
-            _ => 1,
+        let step = if self.grid_shown() && !self.search.is_active() {
+            self.browse.grid_cols()
+        } else {
+            1
         };
         let page = 12;
         let last = items.len() - 1;
         let target = match k {
             Key::Down => Some(pos.map_or(0, |i| (i + step).min(last))),
             Key::Up => Some(pos.map_or(0, |i| i.saturating_sub(step))),
-            Key::Right if self.mode == Mode::Grid => Some(pos.map_or(0, |i| (i + 1).min(last))),
-            Key::Left if self.mode == Mode::Grid => Some(pos.map_or(0, |i| i.saturating_sub(1))),
+            Key::Right if self.grid_shown() => Some(pos.map_or(0, |i| (i + 1).min(last))),
+            Key::Left if self.grid_shown() => Some(pos.map_or(0, |i| i.saturating_sub(1))),
             Key::Home => Some(0),
             Key::End => Some(last),
             Key::PageDown => Some(pos.map_or(0, |i| (i + page * step).min(last))),
@@ -556,7 +592,7 @@ impl Sidebar {
                 }
                 None => (Task::none(), None),
             },
-            Key::Right | Key::Left if self.mode == Mode::Tree && !self.search.is_active() => {
+            Key::Right | Key::Left if self.on_tree() && !self.search.is_active() => {
                 match self.sel.cursor.clone() {
                     Some(c) => {
                         let (t, ev) = self.tree.toggle_path(&c, Some(k == Key::Right));
@@ -566,7 +602,7 @@ impl Sidebar {
                     None => (Task::none(), None),
                 }
             }
-            Key::Parent if self.mode != Mode::Tree => {
+            Key::Parent if !self.on_tree() => {
                 self.sel.clear();
                 let (t, _) = self.browse.update(browse::Msg::Up);
                 (t.map(Msg::Browse), None)
@@ -593,9 +629,14 @@ impl Sidebar {
 
     pub fn update(&mut self, msg: Msg) -> (Task<Msg>, Option<Event>) {
         match msg {
+            Msg::TreeSplit(pane_grid::ResizeEvent { split, ratio }) => {
+                self.tree_split
+                    .resize(split, ratio.clamp(TREE_RATIO_MIN, TREE_RATIO_MAX));
+                (Task::none(), None)
+            }
             Msg::Mode(m) => {
                 self.mode = m;
-                let t = if m == Mode::Grid {
+                let t = if m != Mode::List {
                     self.browse.request_thumbs().map(Msg::Browse)
                 } else {
                     Task::none()
@@ -657,6 +698,7 @@ impl Sidebar {
                 let t = t.map(Msg::Tree);
                 match ev {
                     Some(tree::Event::Item(a)) => {
+                        self.grid_focus = false;
                         let (t2, ev) = self.item(a);
                         (Task::batch([t, t2]), ev)
                     }
@@ -670,7 +712,7 @@ impl Sidebar {
             Msg::Browse(m) => {
                 let (t, ev) = self.browse.update(m);
                 // a freshly loaded folder in grid mode needs its thumbnails
-                let more = if self.mode == Mode::Grid {
+                let more = if self.mode != Mode::List {
                     self.browse.request_thumbs()
                 } else {
                     Task::none()
@@ -678,6 +720,7 @@ impl Sidebar {
                 let t = Task::batch([t, more]).map(Msg::Browse);
                 match ev {
                     Some(browse::Event::Item(a)) => {
+                        self.grid_focus = true;
                         let (t2, ev) = self.item(a);
                         (Task::batch([t, t2]), ev)
                     }
@@ -780,7 +823,16 @@ impl Sidebar {
             self.search.view(&self.sel).map(Msg::Search)
         } else {
             match self.mode {
-                Mode::Tree => self.tree.view(&self.sel).map(Msg::Tree),
+                Mode::Tree => PaneGrid::new(&self.tree_split, |_, half, _| {
+                    pane_grid::Content::new(match half {
+                        Half::Tree => self.tree.view(&self.sel).map(Msg::Tree),
+                        Half::Grid => self.browse.view_grid(&self.sel).map(Msg::Browse),
+                    })
+                })
+                .spacing(8)
+                .on_resize(8, Msg::TreeSplit)
+                .height(Length::Fill)
+                .into(),
                 Mode::List => self.browse.view_list(&self.sel).map(Msg::Browse),
                 Mode::Grid => self.browse.view_grid(&self.sel).map(Msg::Browse),
             }
@@ -796,6 +848,26 @@ mod tests {
     fn press(s: &mut Sidebar, p: &str, mods: Modifiers) -> Option<Event> {
         s.mods = mods;
         s.item(ItemAct::Press(PathBuf::from(p), Kind::Text)).1
+    }
+
+    #[test]
+    fn tree_divider_drags_within_bounds() {
+        let (mut s, _) = Sidebar::new();
+        let split = match s.tree_split.layout() {
+            pane_grid::Node::Split { id, .. } => *id,
+            _ => panic!("tree layout should be a split"),
+        };
+        let ratio = |s: &Sidebar| match s.tree_split.layout() {
+            pane_grid::Node::Split { ratio, .. } => *ratio,
+            _ => unreachable!(),
+        };
+        assert_eq!(ratio(&s), TREE_RATIO);
+        let _ = s.update(Msg::TreeSplit(pane_grid::ResizeEvent { split, ratio: 0.2 }));
+        assert_eq!(ratio(&s), 0.2);
+        let _ = s.update(Msg::TreeSplit(pane_grid::ResizeEvent { split, ratio: 0.0 }));
+        assert_eq!(ratio(&s), TREE_RATIO_MIN);
+        let _ = s.update(Msg::TreeSplit(pane_grid::ResizeEvent { split, ratio: 1.0 }));
+        assert_eq!(ratio(&s), TREE_RATIO_MAX);
     }
 
     #[test]
@@ -836,6 +908,27 @@ mod tests {
         // files aren't drop targets
         let _ = s.item(ItemAct::Hover(PathBuf::from("/f.txt"), Kind::Text, true));
         assert_eq!(s.drop_target(), None);
+    }
+
+    #[test]
+    fn tree_folder_click_opens_in_grid_without_expanding() {
+        let (mut s, _) = Sidebar::new();
+        assert_eq!(s.mode, Mode::Tree);
+        s.mods = Modifiers::empty();
+        let ev = s
+            .item(ItemAct::Press(PathBuf::from("/usr"), Kind::Folder))
+            .1;
+        assert!(matches!(ev, Some(Event::Inspect(_, Kind::Folder))));
+        assert_eq!(s.browse.location, PathBuf::from("/usr"));
+        // grid half: single click selects only, double click navigates
+        s.grid_focus = true;
+        let ev = s
+            .item(ItemAct::Press(PathBuf::from("/usr/bin"), Kind::Folder))
+            .1;
+        assert!(matches!(ev, Some(Event::Inspect(..))));
+        assert_eq!(s.browse.location, PathBuf::from("/usr"));
+        s.item(ItemAct::Press(PathBuf::from("/usr/bin"), Kind::Folder));
+        assert_eq!(s.browse.location, PathBuf::from("/usr/bin"));
     }
 
     #[test]

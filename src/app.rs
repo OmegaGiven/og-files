@@ -1,4 +1,4 @@
-//! App shell: four panes in a pane_grid (files | viewer+inspector / details),
+//! App shell: four panes in a pane_grid (files = tree + the one grid | viewer + inspector / details),
 //! keyboard shortcuts, the context menu, modal dialogs, file jobs (with
 //! undo), the internal clipboard, drives and the folder watcher.
 //!
@@ -45,7 +45,7 @@ enum LeftSize {
     Focus,
 }
 
-const LEFT_RATIO: f32 = 0.28;
+const LEFT_RATIO: f32 = 0.42;
 const FOCUS_RATIO: f32 = 0.85;
 const INSPECTOR_RATIO: f32 = 0.76;
 const DIALOG_INPUT: &str = "dialog-input";
@@ -656,6 +656,12 @@ impl App {
                 Task::none()
             }
             tabs::Event::Focus(target) => {
+                // keep the files pane's selection on what the inspector shows
+                if let Some((p, _)) = target.as_ref().filter(|(p, _)| p.is_absolute()) {
+                    if !self.sidebar.sel.contains(p) {
+                        self.sidebar.sel.only(p.clone());
+                    }
+                }
                 self.details.focus = target.as_ref().map(|(p, _)| p.clone());
                 self.inspector.focus(target).map(Message::Inspector)
             }
@@ -1574,11 +1580,8 @@ impl App {
         match ev {
             sidebar::Event::Open(p, k, pin) => self.open(p, k, pin),
             sidebar::Event::Inspect(p, k) => {
-                // sidebar entries like Trash or network items are pseudo
-                // paths ("trash:", "net:…"), not files: nothing to inspect
-                let target = p.is_absolute().then_some((p, k));
-                self.details.focus = target.as_ref().map(|(p, _)| p.clone());
-                self.inspector.focus(target).map(Message::Inspector)
+                self.details.focus = Some(p.clone());
+                self.inspector.focus(Some((p, k))).map(Message::Inspector)
             }
             sidebar::Event::Menu(t) => {
                 self.show_menu(t);
@@ -1686,6 +1689,17 @@ impl App {
                     self.focus_pane = p;
                 }
                 Task::none()
+            }
+            Message::Inspector(inspector::Msg::Action(act)) => {
+                // act on the same selection as the files pane: if the
+                // inspector shows something the pane doesn't have selected
+                // (tab switch), select it there first
+                if let Some(p) = self.inspector.target().cloned() {
+                    if !self.sidebar.sel.contains(&p) {
+                        self.sidebar.sel.only(p);
+                    }
+                }
+                self.update_inner(Message::Shortcut(act))
             }
             Message::Inspector(m) => {
                 self.inspector.update(m);

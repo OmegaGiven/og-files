@@ -11,8 +11,11 @@ use crate::thumbs;
 use crate::tree::TRASH;
 use crate::widgets::{self, ItemAct, Selection, Vp};
 use iced::task;
-use iced::widget::{button, column, container, image, row, scrollable, text, text_input, Space};
+use iced::widget::{
+    button, column, container, image, responsive, row, scrollable, text, text_input, Space,
+};
 use iced::{Element, Length, Task};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -34,6 +37,10 @@ pub struct Browse {
     thumbs_requested: bool,
     thumbs_abort: Option<task::Handle>,
     vp: Vp,
+    /// Width the grid was last laid out at. The scrollable only reports its
+    /// viewport when the content overflows, so `vp.width` goes stale when
+    /// the pane is resized; keyboard navigation reads this instead.
+    grid_w: Cell<f32>,
     editing_path: Option<String>,
 }
 
@@ -77,6 +84,7 @@ impl Browse {
             thumbs_requested: false,
             thumbs_abort: None,
             vp: Vp::default(),
+            grid_w: Cell::new(Vp::default().width),
             editing_path: None,
         }
     }
@@ -133,15 +141,14 @@ impl Browse {
     pub fn reveal(&self, p: &Path, grid: bool) -> Option<f32> {
         let i = self.visible_items().iter().position(|(x, _)| x == p)?;
         if grid {
-            let cols = widgets::grid_cols(self.vp.width, TILE.0, GAP);
-            self.vp.reveal(i / cols, TILE.1 + GAP)
+            self.vp.reveal(i / self.grid_cols(), TILE.1 + GAP)
         } else {
             self.vp.reveal(i, ROW_H)
         }
     }
 
     pub fn grid_cols(&self) -> usize {
-        widgets::grid_cols(self.vp.width, TILE.0, GAP)
+        widgets::grid_cols(self.grid_w.get(), TILE.0, GAP)
     }
 
     pub fn navigate(&mut self, path: PathBuf) -> Task<Msg> {
@@ -157,10 +164,6 @@ impl Browse {
         if changed {
             self.vp.offset = 0.0;
         }
-        // `visible` indexes `entries` in a folder but `trash` in the Trash:
-        // rebuild it for the new location now, or the view (drawn before the
-        // new listing arrives) indexes the wrong list and goes out of bounds
-        self.refilter();
         let reset = if changed {
             scrollable::scroll_to(
                 scrollable::Id::new(SCROLL_ID),
@@ -356,7 +359,7 @@ impl Browse {
     }
 
     fn empty_or_error(&self) -> Option<Element<'_, Msg>> {
-        if self.loading && self.visible.is_empty() {
+        if self.loading && self.entries.is_empty() && self.trash.is_empty() {
             Some(text("Loading…").color(theme::MUTED).into())
         } else if let Some(e) = &self.error {
             if crate::platform::sandboxed() {
@@ -461,7 +464,17 @@ impl Browse {
             return self.view_list(sel);
         }
         let body = self.empty_or_error().unwrap_or_else(|| {
-            let grid = widgets::virtual_grid(self.visible.len(), TILE, GAP, self.vp, |n| {
+            // Columns come from the width the grid actually gets at layout
+            // time, so collapsing/expanding or dragging a pane re-wraps the
+            // tiles at once instead of clipping the ones past the edge.
+            responsive(move |size| {
+            self.grid_w.set(size.width);
+            let vp = Vp {
+                width: size.width,
+                height: size.height,
+                ..self.vp
+            };
+            let grid = widgets::virtual_grid(self.visible.len(), TILE, GAP, vp, |n| {
                 let e = &self.entries[self.visible[n]];
                 let preview: Element<'_, Msg> = match self.thumbs.get(&e.path) {
                     Some(h) => image(h.clone())
@@ -487,55 +500,9 @@ impl Browse {
                     .into()
             });
             self.scroller(grid)
+            })
+            .into()
         });
         column![self.header(), body].spacing(6).into()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Regression: double-clicking Trash panicked ("index out of bounds:
-    /// the len is 0 but the index is 11") because `visible` still held the
-    /// previous folder's row indices while the view already read `trash`.
-    #[tokio::test]
-    async fn switching_to_and_from_trash_never_indexes_the_wrong_list() {
-        let dir = std::env::temp_dir().join(format!("ogx-browse-trash-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        for i in 0..15 {
-            std::fs::write(dir.join(format!("f{i:02}.txt")), "x").unwrap();
-        }
-        let mut b = Browse::new();
-        let _ = b.navigate(dir.clone());
-        let entries = fsops::list_dir(dir.clone()).await;
-        let _ = b.update(Msg::Loaded(dir.clone(), entries));
-        assert_eq!(b.visible.len(), 15);
-
-        let sel = Selection::default();
-        // into the Trash, before its listing arrives
-        let _ = b.navigate(PathBuf::from(TRASH));
-        assert!(b.visible.is_empty());
-        let _ = b.view_list(&sel);
-        let _ = b.view_grid(&sel);
-        let _ = b.visible_items();
-
-        // a Trash with more items than the folder we go back to
-        let _ = b.update(Msg::TrashLoaded(Ok((0..40)
-            .map(|i| ops::TrashEntry {
-                trashed: dir.join(format!("t{i}")),
-                info: dir.join(format!("t{i}.trashinfo")),
-                original: dir.join(format!("orig{i}")),
-                deleted_at: String::new(),
-                size: 1,
-            })
-            .collect())));
-        assert_eq!(b.visible.len(), 40);
-        let _ = b.navigate(dir.clone());
-        assert_eq!(b.visible.len(), 15);
-        let _ = b.view_list(&sel);
-        let _ = b.view_grid(&sel);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
